@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environnement
+.env
+.env.local
+
+# Données
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache embeddings (si on les sauvegarde)
+embeddings_cache/
+embeddings_cache.npy
+search_texts_cache.pkl
+knowledge_cache/
+*.npy
+*.pkl
+
+
+# Bases de données SQL
+*.sql
+6_EUROCODES/

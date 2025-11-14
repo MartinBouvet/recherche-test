@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recherche Intelligente - Matériaux de Construction</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .search-container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            margin-bottom: 30px;
+        }
+
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 15px 20px;
+            font-size: 1.1em;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus {
+            border-color: #667eea;
+        }
+
+        .search-button {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-weight: 600;
+        }
+
+        .mic-button {
+            padding: 15px;
+            background: #f0f0f0;
+            color: #667eea;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 50px;
+        }
+
+        .mic-button:hover {
+            background: #e0e8ff;
+            border-color: #667eea;
+        }
+
+        .mic-button.recording {
+            background: #ff4444;
+            color: white;
+            border-color: #ff4444;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .search-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .search-button:active {
+            transform: translateY(0);
+        }
+
+        .search-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .query-understood {
+            background: #f0f4ff;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .query-understood strong {
+            color: #667eea;
+        }
+
+        .confirmation-message {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border-left: 4px solid #4caf50;
+            font-style: italic;
+            color: #2e7d32;
+        }
+
+        .results-container {
+            display: grid;
+            gap: 20px;
+        }
+
+        .result-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            gap: 20px;
+        }
+
+        .result-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        }
+
+        .result-image {
+            width: 120px;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 10px;
+            background: #f0f0f0;
+        }
+
+        .result-content {
+            flex: 1;
+        }
+
+        .result-title {
+            font-size: 1.3em;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .result-reference {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 8px;
+        }
+
+        .result-description {
+            color: #777;
+            font-size: 0.95em;
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+
+        .result-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .result-price {
+            font-size: 1.4em;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .no-results h2 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-between;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .example-queries {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .example-queries h3 {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .example-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .example-tag {
+            background: #f0f4ff;
+            color: #667eea;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .example-tag:hover {
+            background: #e0e8ff;
+        }
+
+        /* Styles pour les projets */
+        .project-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .project-header h2 {
+            margin: 0 0 10px 0;
+            font-size: 1.8em;
+        }
+
+        .project-description {
+            margin: 0;
+            font-size: 1.1em;
+            opacity: 0.95;
+        }
+
+        .material-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+            border-left: 4px solid #667eea;
+        }
+
+        .material-title {
+            margin: 0 0 10px 0;
+            color: #333;
+            font-size: 1.4em;
+        }
+
+        .material-description {
+            margin: 0 0 15px 0;
+            color: #666;
+            font-style: italic;
+        }
+
+        .material-results {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .project-confirmation {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            font-size: 1.1em;
+            line-height: 1.6;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .project-confirmation strong {
+            font-weight: 600;
+        }
+
+        .material-count {
+            font-size: 0.7em;
+            color: #667eea;
+            font-weight: normal;
+            margin-left: 10px;
+        }
+
+        .project-confirmation {
+            background: #e8f4f8;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+            font-size: 1.05em;
+        }
+
+        .no-material-results {
+            padding: 20px;
+            text-align: center;
+            color: #999;
+            font-style: italic;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Recherche Intelligente</h1>
+            <p>Recherchez vos matériaux de construction en langage naturel</p>
+        </div>
+
+        <div class="search-container">
+            <div class="search-box">
+                <input 
+                    type="text" 
+                    class="search-input" 
+                    id="searchInput" 
+                    placeholder="Ex: Je cherche du sable pour faire du béton..."
+                    autocomplete="off"
+                >
+                <button class="mic-button" id="micButton" title="Recherche vocale">
+                    🎤
+                </button>
+                <button class="search-button" id="searchButton">Rechercher</button>
+            </div>
+
+            <div class="example-queries">
+                <h3>Exemples de recherches :</h3>
+                <div class="example-tags">
+                    <span class="example-tag" onclick="searchExample('sable pour béton')">sable pour béton</span>
+                    <span class="example-tag" onclick="searchExample('carrelage extérieur gris')">carrelage extérieur gris</span>
+                    <span class="example-tag" onclick="searchExample('isolation laine de roche')">isolation laine de roche</span>
+                    <span class="example-tag" onclick="searchExample('pavé terrasse')">pavé terrasse</span>
+                    <span class="example-tag" onclick="searchExample('enduit plâtre')">enduit plâtre</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="resultsArea"></div>
+    </div>
+
+    <script>
+        const searchInput = document.getElementById('searchInput');
+        const searchButton = document.getElementById('searchButton');
+        const micButton = document.getElementById('micButton');
+        const resultsArea = document.getElementById('resultsArea');
+
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+
+        // Recherche au clic
+        searchButton.addEventListener('click', performSearch);
+
+        // Recherche à la touche Entrée
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+
+        // Recherche avec exemple
+        function searchExample(query) {
+            searchInput.value = query;
+            performSearch();
+        }
+
+        // Gestion de la recherche vocale
+        micButton.addEventListener('click', async () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                await startRecording();
+            }
+        });
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    // MediaRecorder enregistre généralement en WebM ou OGG
+                    const mimeType = mediaRecorder.mimeType || 'audio/webm';
+                    const audioBlob = new Blob(audioChunks, { type: mimeType });
+                    await transcribeAndSearch(audioBlob);
+                    
+                    // Arrêter tous les tracks du stream
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                micButton.classList.add('recording');
+                micButton.textContent = '⏹️';
+                micButton.title = 'Arrêter l\'enregistrement';
+            } catch (error) {
+                alert('Impossible d\'accéder au microphone. Vérifiez les permissions de votre navigateur.');
+                console.error('Erreur d\'accès au microphone:', error);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                micButton.classList.remove('recording');
+                micButton.textContent = '🎤';
+                micButton.title = 'Recherche vocale';
+            }
+        }
+
+        async function transcribeAndSearch(audioBlob) {
+            // Afficher le loading
+            resultsArea.innerHTML = `
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <p>Transcription de votre demande...</p>
+                </div>
+            `;
+
+            try {
+                // Envoyer l'audio (Whisper accepte plusieurs formats)
+                const formData = new FormData();
+                const extension = audioBlob.type.includes('webm') ? 'webm' : 
+                                audioBlob.type.includes('ogg') ? 'ogg' : 'wav';
+                formData.append('audio', audioBlob, `recording.${extension}`);
+
+                // Transcrire l'audio
+                const transcribeResponse = await fetch('/api/transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!transcribeResponse.ok) {
+                    throw new Error('Erreur lors de la transcription');
+                }
+
+                const transcribeData = await transcribeResponse.json();
+                const transcribedText = transcribeData.text;
+
+                // Mettre le texte transcrit dans le champ de recherche
+                searchInput.value = transcribedText;
+
+                // Effectuer la recherche
+                await performSearch();
+            } catch (error) {
+                resultsArea.innerHTML = `
+                    <div class="no-results">
+                        <h2>Erreur</h2>
+                        <p>Une erreur est survenue lors de la transcription: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function performSearch() {
+            const query = searchInput.value.trim();
+            
+            if (!query) {
+                alert('Veuillez entrer une requête de recherche');
+                return;
+            }
+
+            // Désactiver le bouton
+            searchButton.disabled = true;
+            searchButton.textContent = 'Recherche...';
+
+            // Afficher le loading
+            resultsArea.innerHTML = `
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <p>Analyse de votre requête avec l'IA...</p>
+                </div>
+            `;
+
+            try {
+                const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=10`);
+                const data = await response.json();
+
+                displayResults(data);
+            } catch (error) {
+                resultsArea.innerHTML = `
+                    <div class="no-results">
+                        <h2>Erreur</h2>
+                        <p>Une erreur est survenue lors de la recherche: ${error.message}</p>
+                    </div>
+                `;
+            } finally {
+                searchButton.disabled = false;
+                searchButton.textContent = 'Rechercher';
+            }
+        }
+
+        function displayResults(data) {
+            if (data.total_results === 0) {
+                resultsArea.innerHTML = `
+                    <div class="no-results">
+                        <h2>Aucun résultat trouvé</h2>
+                        <p>Essayez avec d'autres mots-clés ou reformulez votre recherche.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            
+            // Si c'est un projet avec matériaux organisés
+            if (data.is_project && (data.materiaux || data.materiaux_list)) {
+                // Message de confirmation en premier (très visible)
+                if (data.confirmation_message) {
+                    html += `
+                        <div class="confirmation-message project-confirmation">
+                            <strong>${escapeHtml(data.confirmation_message)}</strong>
+                        </div>
+                    `;
+                }
+                
+                // En-tête du projet
+                html += `
+                    <div class="project-header">
+                        <h2>📋 Projet : ${escapeHtml(data.query_understood)}</h2>
+                    </div>
+                `;
+                
+                // Afficher les résultats par matériau
+                if (data.materiaux && Object.keys(data.materiaux).length > 0) {
+                    for (const [materiauType, materiauData] of Object.entries(data.materiaux)) {
+                        const numResults = materiauData.results ? materiauData.results.length : 0;
+                        html += `
+                            <div class="material-section">
+                                <h3 class="material-title">🔧 ${escapeHtml(materiauType.charAt(0).toUpperCase() + materiauType.slice(1))} ${numResults > 0 ? `<span class="material-count">(${numResults} produit${numResults > 1 ? 's' : ''})</span>` : ''}</h3>
+                                <p class="material-description">${escapeHtml(materiauData.description)}</p>
+                                <div class="material-results">
+                        `;
+                        
+                        if (materiauData.results && materiauData.results.length > 0) {
+                            for (const result of materiauData.results) {
+                                html += formatResult(result);
+                            }
+                        } else {
+                            html += `
+                                <div class="no-material-results">
+                                    <p>Aucun produit trouvé pour cette catégorie. Essayez avec d'autres critères de recherche.</p>
+                                </div>
+                            `;
+                        }
+                        
+                        html += `
+                                </div>
+                            </div>
+                        `;
+                    }
+                } else {
+                    // Si pas de résultats organisés, afficher les résultats classiques
+                    html += '<div class="results-container">';
+                    data.results.forEach(result => {
+                        html += formatResult(result);
+                    });
+                    html += '</div>';
+                }
+            } else {
+                // Mode recherche classique
+                // Stats
+                html += `
+                    <div class="stats">
+                        <span><strong>${data.total_results}</strong> résultat(s) trouvé(s)</span>
+                        <span>Temps de recherche: <strong>${data.search_time}s</strong></span>
+                    </div>
+                `;
+
+                // Message de confirmation (pour recherche vocale)
+                if (data.confirmation_message) {
+                    html += `
+                        <div class="confirmation-message">
+                            ${escapeHtml(data.confirmation_message)}
+                        </div>
+                    `;
+                }
+
+                // Requête comprise
+                if (data.query_understood && data.query_understood !== searchInput.value.trim()) {
+                    html += `
+                        <div class="query-understood">
+                            <strong>Requête comprise :</strong> "${data.query_understood}"
+                        </div>
+                    `;
+                }
+
+                // Résultats
+                html += '<div class="results-container">';
+                
+                data.results.forEach(result => {
+                    html += formatResult(result);
+                });
+
+                html += '</div>';
+            }
+            
+            resultsArea.innerHTML = html;
+        }
+
+        function formatResult(result) {
+            // Nettoyer le nom de fichier photo (enlever les quotes)
+            let photoName = result.photo1 || '';
+            if (photoName) {
+                photoName = photoName.replace(/^['"]+|['"]+$/g, '').trim();
+            }
+            const imageUrl = photoName ? `/images/${encodeURIComponent(photoName)}` : 'https://via.placeholder.com/120?text=Produit';
+            const price = result.prix_vente_particulier || result.prix_vente;
+            const priceText = price ? `${price.toFixed(2)} €` : 'Prix sur demande';
+            
+            return `
+                <div class="result-card">
+                    <img src="${imageUrl}" alt="${escapeHtml(result.libelle)}" class="result-image" onerror="this.src='https://via.placeholder.com/120?text=Produit'">
+                    <div class="result-content">
+                        <div class="result-title">${escapeHtml(result.libelle)}</div>
+                        <div class="result-reference">Réf: ${escapeHtml(result.reference)}</div>
+                        ${result.designation ? `<div class="result-description">${escapeHtml(result.designation.substring(0, 150))}${result.designation.length > 150 ? '...' : ''}</div>` : ''}
+                        <div class="result-footer">
+                            <div class="result-price">${priceText}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
+
