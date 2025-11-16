@@ -1,0 +1,529 @@
+"""
+Moteur de recherche intelligent utilisant un modèle LLM
+pour comprendre les requêtes et effectuer une recherche hybride
+
+OPTIMISÉ POUR QWEN2.5-3B-INSTRUCT
+Version améliorée pour vitesse maximale
+"""
+
+import time
+import re
+import os
+import json
+import hashlib
+from typing import List, Dict, Any, Optional
+from sentence_transformers import SentenceTransformer
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+import ollama
+from rapidfuzz import fuzz, process
+from synonyms import expand_with_synonyms, get_synonyms
+from expert_knowledge import detect_project_type, get_project_materials, get_expert_prompt
+from knowledge_base import KnowledgeBase
+from config import (
+    LLM_MODEL_NAME, 
+    LLM_OPTIONS, 
+    LLM_OPTIONS_PROJECT,
+    USE_LLM,
+    EMBEDDING_MODEL_NAME,
+    EMBEDDINGS_CACHE_PATH,
+    SEARCH_TEXTS_CACHE_PATH,
+    SEMANTIC_WEIGHT,
+    TEXTUAL_WEIGHT,
+    EUROCODES_DIR,
+    KNOWLEDGE_CACHE_DIR,
+)
+
+class SearchEngine:
+    """Moteur de recherche intelligent avec LLM"""
+    
+    def __init__(self, articles: List[Dict[str, Any]], model_name: str = None, use_llm: bool = None):
+        self.articles = articles
+        # Utiliser la config par défaut si non spécifié
+        self.model_name = model_name or LLM_MODEL_NAME
+        self.use_llm = use_llm if use_llm is not None else USE_LLM
+        
+        print(f"🚀 Initialisation avec modèle: {self.model_name}")
+        
+        # Modèle d'embeddings pour la recherche sémantique
+        print("📚 Chargement du modèle d'embeddings...")
+        self.embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+        
+        # Préparation des données pour la recherche
+        print("⚡ Préparation des embeddings...")
+        self._prepare_search_data()
+        
+        # Base de connaissances Eurocodes (optionnelle)
+        self.knowledge_base = None
+        try:
+            self.knowledge_base = KnowledgeBase(
+                documents_dir=EUROCODES_DIR,
+                embedding_model=self.embedding_model,
+                cache_dir=KNOWLEDGE_CACHE_DIR,
+            )
+            if self.knowledge_base and not self.knowledge_base.enabled:
+                self.knowledge_base = None
+        except Exception as exc:
+            print(f"⚠️  Base Eurocodes non disponible: {exc}")
+            self.knowledge_base = None
+        
+        print("✅ Moteur de recherche prêt!")
+    
+    def _prepare_search_data(self):
+        """Prépare les données pour la recherche (embeddings, index)"""
+        # Vérifier si les embeddings sont en cache
+        if os.path.exists(EMBEDDINGS_CACHE_PATH) and os.path.exists(SEARCH_TEXTS_CACHE_PATH):
+            print("♻️  Chargement depuis cache...")
+            try:
+                import pickle
+                self.embeddings = np.load(EMBEDDINGS_CACHE_PATH)
+                with open(SEARCH_TEXTS_CACHE_PATH, 'rb') as f:
+                    self.search_texts = pickle.load(f)
+                    self.article_index = pickle.load(f)
+                print(f"✅ {len(self.article_index)} articles en cache!")
+                return
+            except Exception as e:
+                print(f"⚠️  Cache invalide: {e}")
+        
+        # Générer les embeddings
+        print("🔧 Génération des embeddings (première fois uniquement)...")
+        self.search_texts = []
+        self.article_index = []
+        
+        for i, article in enumerate(self.articles):
+            search_text = self._build_search_text(article)
+            self.search_texts.append(search_text)
+            self.article_index.append(i)
+        
+        # Encoder tous les textes d'un coup (plus rapide)
+        self.embeddings = self.embedding_model.encode(
+            self.search_texts,
+            batch_size=32,
+            show_progress_bar=True,
+            convert_to_numpy=True
+        )
+        
+        # Sauvegarder en cache
+        try:
+            import pickle
+            np.save(EMBEDDINGS_CACHE_PATH, self.embeddings)
+            with open(SEARCH_TEXTS_CACHE_PATH, 'wb') as f:
+                pickle.dump(self.search_texts, f)
+                pickle.dump(self.article_index, f)
+            print("💾 Embeddings sauvegardés!")
+        except Exception as e:
+            print(f"⚠️  Impossible de sauvegarder: {e}")
+    
+    def _build_search_text(self, article: Dict[str, Any]) -> str:
+        """Construit le texte de recherche pour un article"""
+        parts = []
+        
+        if article.get('libelle'):
+            parts.append(article['libelle'])
+        if article.get('designation'):
+            parts.append(article['designation'])
+        if article.get('motsClefs'):
+            parts.append(article['motsClefs'])
+        if article.get('mainKeyWords'):
+            parts.append(article['mainKeyWords'])
+        if article.get('reference'):
+            parts.append(f"Référence: {article['reference']}")
+        if article.get('codeFournisseur'):
+            parts.append(f"Code: {article['codeFournisseur']}")
+        
+        return " | ".join(parts)
+    
+    def _understand_query_with_llm(self, query: str) -> Dict[str, Any]:
+        """
+        Utilise Qwen2.5-3B pour comprendre la requête utilisateur
+        OPTIMISÉ POUR LA VITESSE avec prompts concis
+        """
+        # Détecter si c'est un projet
+        project_type = detect_project_type(query)
+        is_project = project_type is not None
+        
+        # Contexte Eurocodes (optionnel)
+        knowledge_context = ""
+        if self.knowledge_base:
+            try:
+                top_k = 6 if is_project else 3
+                knowledge_context = self.knowledge_base.build_context_block(
+                    query=query,
+                    top_k=top_k,
+                )
+            except Exception as exc:
+                print(f"⚠️  Contexte Eurocodes indisponible: {exc}")
+        
+        context_prefix = f"{knowledge_context}\n\n" if knowledge_context else ""
+        
+        # Prompts optimisés pour Qwen2.5
+        if is_project:
+            # Mode projet : décomposition en matériaux
+            prompt = f"""{context_prefix}Expert construction. Projet: "{query}"
+
+Liste TOUS les matériaux nécessaires.
+
+Format JSON uniquement:
+{{
+  "is_project": true,
+  "project_type": "{project_type}",
+  "reformulation": "description courte",
+  "prix_max": null,
+  "prix_min": null,
+  "materiaux": [
+    {{"type": "nom", "critères_recherche": "mots-clés", "description": "usage"}}
+  ]
+}}
+
+Exemple cloison parpaings:
+{{
+  "is_project": true,
+  "project_type": "cloison_parpaings",
+  "reformulation": "cloison parpaings",
+  "prix_max": null,
+  "prix_min": null,
+  "materiaux": [
+    {{"type": "parpaing", "critères_recherche": "parpaing cloison creux", "description": "Structure"}},
+    {{"type": "mortier", "critères_recherche": "mortier colle", "description": "Assemblage"}},
+    {{"type": "enduit", "critères_recherche": "enduit intérieur", "description": "Finition"}}
+  ]
+}}"""
+        else:
+            # Mode recherche classique
+            prompt = f"""{context_prefix}Analyse requête matériaux: "{query}"
+
+Extrait:
+1. Reformulation optimisée
+2. Prix max/min si mentionnés
+
+JSON uniquement:
+{{
+  "is_project": false,
+  "reformulation": "mots-clés",
+  "prix_max": nombre_ou_null,
+  "prix_min": nombre_ou_null
+}}
+
+Exemples:
+- "carrelage < 40€" → {{"is_project": false, "reformulation": "carrelage", "prix_max": 40, "prix_min": null}}
+- "sable 20-50€" → {{"is_project": false, "reformulation": "sable", "prix_max": 50, "prix_min": 20}}
+- "pavé terrasse" → {{"is_project": false, "reformulation": "pavé terrasse", "prix_max": null, "prix_min": null}}"""
+
+        try:
+            # Choisir les bonnes options selon le type
+            options = LLM_OPTIONS_PROJECT if is_project else LLM_OPTIONS
+            
+            response = ollama.chat(
+                model=self.model_name,
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'Expert matériaux construction. Réponds JSON uniquement, sans texte supplémentaire.' if not is_project else get_expert_prompt()
+                    },
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                options=options
+            )
+            
+            result_text = response['message']['content'].strip()
+            
+            # Parser le JSON
+            json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group(0))
+                    is_project = parsed.get('is_project', False)
+                    reformulation = parsed.get('reformulation', query)
+                    prix_max = parsed.get('prix_max')
+                    prix_min = parsed.get('prix_min')
+                    materiaux = parsed.get('materiaux', [])
+                    
+                    # Fallback base de connaissances si projet sans matériaux
+                    if is_project and not materiaux:
+                        project_type = parsed.get('project_type') or detect_project_type(query)
+                        if project_type:
+                            materiaux_base = get_project_materials(project_type)
+                            materiaux = [
+                                {
+                                    "type": m.get("type", ""),
+                                    "critères_recherche": m.get("critères", ""),
+                                    "description": m.get("description", "")
+                                }
+                                for m in materiaux_base
+                            ]
+                except Exception as e:
+                    # Fallback
+                    is_project = False
+                    reformulation = query
+                    prix_max = None
+                    prix_min = None
+                    materiaux = []
+            else:
+                # Extraction manuelle des prix
+                reformulation = result_text.strip('"').strip("'").strip()
+                prix_max = None
+                prix_min = None
+                
+                prix_patterns = [
+                    r'(?:à|moins de|sous|max)\s*(\d+)\s*(?:euros?|€)',
+                    r'(\d+)\s*(?:euros?|€)\s*(?:max|ou moins)',
+                    r'entre\s*(\d+)\s*(?:et|à)\s*(\d+)\s*(?:euros?|€)',
+                ]
+                
+                query_lower = query.lower()
+                for pattern in prix_patterns:
+                    match = re.search(pattern, query_lower)
+                    if match:
+                        if len(match.groups()) == 2:
+                            prix_min, prix_max = float(match.group(1)), float(match.group(2))
+                        else:
+                            prix_max = float(match.group(1))
+                        break
+                
+                materiaux = []
+            
+            return {
+                'is_project': is_project,
+                'reformulation': reformulation,
+                'prix_max': prix_max,
+                'prix_min': prix_min,
+                'materiaux': materiaux,
+                'project_type': project_type
+            }
+            
+        except Exception as e:
+            print(f"⚠️  Erreur LLM: {e}")
+            # Fallback complet
+            return {
+                'is_project': False,
+                'reformulation': query,
+                'prix_max': None,
+                'prix_min': None,
+                'materiaux': [],
+                'project_type': None
+            }
+    
+    def _semantic_search(self, query: str, limit: int = 50) -> List[tuple]:
+        """Recherche sémantique par similarité d'embeddings"""
+        query_embedding = self.embedding_model.encode([query], convert_to_numpy=True)
+        similarities = cosine_similarity(query_embedding, self.embeddings)[0]
+        
+        # Top résultats
+        top_indices = np.argsort(similarities)[-limit:][::-1]
+        return [(self.article_index[i], similarities[i]) for i in top_indices]
+    
+    def _textual_search(self, query: str, expanded_terms: List[str], limit: int = 50) -> List[tuple]:
+        """Recherche textuelle avec scoring intelligent"""
+        scores = []
+        query_lower = query.lower()
+        
+        for idx, text in enumerate(self.search_texts):
+            text_lower = text.lower()
+            score = 0.0
+            
+            # Match exact du terme principal
+            if query_lower in text_lower:
+                score += 10.0
+            
+            # Match des termes individuels
+            query_terms = query_lower.split()
+            for term in query_terms:
+                if term in text_lower:
+                    score += 3.0
+            
+            # Match des synonymes/expansions
+            for exp_term in expanded_terms:
+                if exp_term.lower() in text_lower:
+                    score += 2.0
+            
+            # Fuzzy matching pour tolérance aux fautes
+            ratio = fuzz.token_set_ratio(query_lower, text_lower)
+            score += ratio / 20.0
+            
+            if score > 0:
+                scores.append((self.article_index[idx], score))
+        
+        # Trier et limiter
+        scores.sort(key=lambda x: x[1], reverse=True)
+        return scores[:limit]
+    
+    def _hybrid_search(self, query: str, limit: int = 50) -> List[tuple]:
+        """Recherche hybride (sémantique + textuelle)"""
+        # Expansion avec synonymes
+        expanded = expand_with_synonyms(query)
+        
+        # Recherche sémantique
+        semantic_results = self._semantic_search(query, limit=limit)
+        
+        # Recherche textuelle
+        textual_results = self._textual_search(query, expanded, limit=limit)
+        
+        # Combiner les scores
+        combined_scores = {}
+        
+        for idx, score in semantic_results:
+            combined_scores[idx] = combined_scores.get(idx, 0) + score * SEMANTIC_WEIGHT
+        
+        for idx, score in textual_results:
+            # Normaliser le score textuel (max ~50)
+            norm_score = min(score / 50.0, 1.0)
+            combined_scores[idx] = combined_scores.get(idx, 0) + norm_score * TEXTUAL_WEIGHT
+        
+        # Trier
+        sorted_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)
+        return sorted_results[:limit]
+    
+    def _generate_confirmation_message(self, query: str, reformulation: str, num_results: int) -> str:
+        """Génère un message de confirmation naturel"""
+        if num_results == 0:
+            return f"Aucun résultat trouvé pour {reformulation}."
+        
+        if num_results == 1:
+            return f"J'ai trouvé 1 produit correspondant à {reformulation}."
+        
+        # Messages variés
+        import random
+        if num_results < 5:
+            messages = [
+                f"Voici {num_results} produits pour {reformulation}.",
+                f"J'ai trouvé {num_results} produits pour {reformulation}.",
+            ]
+        else:
+            messages = [
+                f"Voici {num_results} produits pour {reformulation}.",
+                f"J'ai trouvé {num_results} solutions pour {reformulation}.",
+            ]
+        
+        random.seed(hash(reformulation) % 1000)
+        return random.choice(messages)
+    
+    def search(self, query: str, limit: int = 10, min_score: float = 0.0) -> Dict[str, Any]:
+        """
+        Recherche intelligente avec cache
+        OPTIMISÉ POUR LA VITESSE
+        """
+        start_time = time.time()
+        
+        # Cache
+        query_hash = hashlib.md5(f"{query.lower().strip()}_{limit}_{min_score}".encode()).hexdigest()
+        
+        if not hasattr(self, '_search_cache'):
+            self._search_cache = {}
+        
+        if query_hash in self._search_cache:
+            cached = self._search_cache[query_hash]
+            cached['search_time'] = 0.001
+            return cached
+        
+        # Compréhension avec LLM
+        if self.use_llm:
+            llm_result = self._understand_query_with_llm(query)
+            reformulation = llm_result['reformulation']
+            prix_max = llm_result['prix_max']
+            prix_min = llm_result['prix_min']
+            is_project = llm_result['is_project']
+            materiaux = llm_result['materiaux']
+            project_type = llm_result['project_type']
+        else:
+            reformulation = query
+            prix_max = None
+            prix_min = None
+            is_project = False
+            materiaux = []
+            project_type = None
+        
+        # Recherche par matériau si projet
+        if is_project and materiaux:
+            materiaux_results = {}
+            materiaux_list = []
+            
+            for materiau in materiaux:
+                mat_type = materiau.get('type', '')
+                mat_search = materiau.get('critères_recherche', mat_type)
+                mat_desc = materiau.get('description', '')
+                
+                # Recherche pour ce matériau
+                mat_results_raw = self._hybrid_search(mat_search, limit=limit)
+                
+                # Construire résultats
+                mat_results = []
+                for idx, score in mat_results_raw:
+                    if score >= min_score:
+                        article = self.articles[idx].copy()
+                        article['score'] = float(score)
+                        mat_results.append(article)
+                
+                # Filtrer prix
+                if prix_max is not None:
+                    mat_results = [r for r in mat_results if r.get('prix_vente', float('inf')) <= prix_max]
+                if prix_min is not None:
+                    mat_results = [r for r in mat_results if r.get('prix_vente', 0) >= prix_min]
+                
+                materiaux_results[mat_type] = {
+                    'results': mat_results[:limit],
+                    'description': mat_desc,
+                    'search_query': mat_search
+                }
+                materiaux_list.append(mat_type)
+            
+            # Total unique
+            all_results = []
+            seen_ids = set()
+            for mat_data in materiaux_results.values():
+                for r in mat_data['results']:
+                    if r['id'] not in seen_ids:
+                        all_results.append(r)
+                        seen_ids.add(r['id'])
+            
+            result = {
+                'results': all_results[:limit],
+                'query_understood': reformulation,
+                'total_results': len(all_results),
+                'search_time': time.time() - start_time,
+                'confirmation_message': self._generate_confirmation_message(query, reformulation, len(all_results)),
+                'knowledge_context': None,
+                'is_project': True,
+                'materiaux': materiaux_results,
+                'materiaux_list': materiaux_list
+            }
+        else:
+            # Recherche simple
+            raw_results = self._hybrid_search(reformulation, limit=limit * 2)
+            
+            results = []
+            for idx, score in raw_results:
+                if score >= min_score:
+                    article = self.articles[idx].copy()
+                    article['score'] = float(score)
+                    results.append(article)
+            
+            # Filtrer prix
+            if prix_max is not None:
+                results = [r for r in results if r.get('prix_vente', float('inf')) <= prix_max]
+            if prix_min is not None:
+                results = [r for r in results if r.get('prix_vente', 0) >= prix_min]
+            
+            results = results[:limit]
+            
+            result = {
+                'results': results,
+                'query_understood': reformulation,
+                'total_results': len(results),
+                'search_time': time.time() - start_time,
+                'confirmation_message': self._generate_confirmation_message(query, reformulation, len(results)),
+                'knowledge_context': None,
+                'is_project': False
+            }
+        
+        # Cache
+        self._search_cache[query_hash] = result
+        
+        # Limiter taille cache
+        if len(self._search_cache) > 100:
+            oldest_key = next(iter(self._search_cache))
+            del self._search_cache[oldest_key]
+        
+        return result
