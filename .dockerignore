@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Cache
+*.npy
+*.pkl
+embeddings_cache.npy
+search_texts_cache.pkl
+
+# Documentation
+README_LOCAL.md
+6_EUROCODES/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
